@@ -1,0 +1,7 @@
+python clip_vit_peft.py --dataset "/your/path/to/datasets/stanford_cars"
+python clip_vit_peft.py --dataset "/your/path/to/datasets/gtsrb"
+python clip_vit_peft.py --dataset "/your/path/to/datasets/eurosat"
+python clip_vit_peft.py --dataset "/your/path/to/datasets/svhn"
+python clip_vit_peft.py --dataset "/your/path/to/datasets/sun397"
+python clip_vit_peft.py --dataset "/your/path/to/datasets/resisc45"
+python clip_vit_peft.py --dataset "/your/path/to/datasets/dtd"

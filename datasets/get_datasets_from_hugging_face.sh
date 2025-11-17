@@ -1,0 +1,14 @@
+git clone https://huggingface.co/datasets/tanganke/dtd
+git clone https://huggingface.co/datasets/tanganke/stanford_cars
+git clone https://huggingface.co/datasets/tanganke/gtsrb
+git clone https://huggingface.co/datasets/tanganke/resisc45
+git clone https://huggingface.co/datasets/tanganke/eurosat
+git clone https://huggingface.co/datasets/tanganke/sun397
+git clone https://huggingface.co/datasets/ufldl-stanford/svhn
+git clone https://huggingface.co/datasets/google/boolq
+git clone https://huggingface.co/datasets/baber/piqa
+git clone https://huggingface.co/datasets/Rowan/hellaswag
+git clone https://huggingface.co/datasets/allenai/winogrande
+git clone https://huggingface.co/datasets/allenai/openbookqa
+git clone https://huggingface.co/datasets/lighteval/siqa
+git clone https://huggingface.co/datasets/nyu-mll/glue
