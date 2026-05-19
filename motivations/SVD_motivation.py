@@ -272,7 +272,7 @@ def HO_GSVD_result_with_regularization(pi=1e-3):
         V = np.real_if_close(V)
         eigvals = np.real_if_close(eigvals)
         V_inv_T = la.inv(V).T
-        print(f"正交性测试{V.T @ V }")
+        print(f"Orthogonality check: {V.T @ V }")
 
 
         Bi_list = [D @ V_inv_T for D in c_dict[category]]
@@ -398,6 +398,5 @@ if __name__ == '__main__':
     # HO_GSVD_result_with_regularization()
     # zero_result()
     HO_CSD_result_with_regularization()
-
 
 

@@ -136,7 +136,7 @@ def label_to_idx(example, task, num_labels):
 
 
 # --- Main Training and Evaluation Function ---
-def main(method: str, dataset_name: str, device: torch.device, model_path: str):
+def main(method: str, dataset_name: str, device: torch.device, model_path: str, dataset_root: str):
     num_epochs = 6
     batch_size = 4
     gradient_accumulation_steps = 8
@@ -160,16 +160,21 @@ def main(method: str, dataset_name: str, device: torch.device, model_path: str):
         print(f"Tokenizer pad_token set to eos_token: {tokenizer.pad_token}")
 
     # 2. Load and Preprocess Dataset
-    print(f"Attempting to load dataset: /your/path/to/datasets/{dataset_name}")
+    if dataset_name in ["arc_challenge", "arc_easy"]:
+        dataset_path = os.path.join(dataset_root, "ai2_arc")
+    else:
+        dataset_path = os.path.join(dataset_root, dataset_name)
+
+    print(f"Attempting to load dataset: {dataset_path}")
     try:
         if dataset_name == "winogrande":
-            raw_ds = load_dataset(f"/your/path/to/datasets/{dataset_name}", "winogrande_l")
+            raw_ds = load_dataset(dataset_path, "winogrande_l")
         elif dataset_name == "arc_challenge":
-            raw_ds = load_dataset(f"/your/path/to/datasets/ai2_arc", "ARC-Challenge")
+            raw_ds = load_dataset(dataset_path, "ARC-Challenge")
         elif dataset_name == "arc_easy":
-            raw_ds = load_dataset(f"/your/path/to/datasets/ai2_arc", "ARC-Easy")
+            raw_ds = load_dataset(dataset_path, "ARC-Easy")
         else:
-            raw_ds = load_dataset(f"/your/path/to/datasets/{dataset_name}")
+            raw_ds = load_dataset(dataset_path)
         print(f"Dataset '{dataset_name}' loaded successfully. Splits: {raw_ds.keys()}")
     except Exception as e:
         print(f"Error loading dataset '{dataset_name}': {e}")
@@ -241,10 +246,10 @@ def main(method: str, dataset_name: str, device: torch.device, model_path: str):
     model = LlamaForSequenceClassification.from_pretrained(
         model_path,
         num_labels=num_labels,
-        # torch_dtype=torch.float16,
-        device_map="auto",  # Automatically handle device placement for large models
     )
     print("Model loaded.")
+    model.to(device)
+    print(f"Model moved to {device}.")
 
     if method.lower() != "fullft":
         config = get_lora_config(method)
@@ -413,11 +418,18 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="siqa", help="Dataset to use for training.")
     parser.add_argument("--model_path", type=str, default="/your/path/to/models/Llama-2-7b-hf",
                         help="Path to the base LLaMA model.")
-    # The device argument is kept for consistency but device_map="auto" is the primary mechanism
+    parser.add_argument("--dataset_root", type=str, default="/your/path/to/datasets",
+                        help="Path to the dataset root directory.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Primary device for data.")
 
     args = parser.parse_args()
     device = torch.device(args.device)
 
-    main(method=args.method, dataset_name=args.dataset, device=device, model_path=args.model_path)
+    main(
+        method=args.method,
+        dataset_name=args.dataset,
+        device=device,
+        model_path=args.model_path,
+        dataset_root=args.dataset_root,
+    )

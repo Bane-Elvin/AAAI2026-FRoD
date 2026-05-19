@@ -24,55 +24,45 @@ from peft.utils import PeftType
 @dataclass
 class FRODConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`VeraModel`].
+    This is the configuration class to store the configuration of a [`FRODModel`].
 
-    Paper: https://arxiv.org/abs/2310.11454.
+    Paper: https://doi.org/10.1609/aaai.v40i31.39813.
 
     Args:
-        r (`int`, *optional*, defaults to `256`):
-            VeRA parameter dimension ("rank"). Choose higher values than LoRA ranks here, since VeRA uses far fewer
-            parameters than LoRA (see Table 1).
         target_modules (`Union[List[str], str]`):
-            The names of the modules to apply Vera to. Only linear layers are supported.
+            The names of the modules to apply FRoD to. Only linear layers are supported.
         projection_prng_key (`int`):
-            Vera PRNG init key. Used for initialising vera_A and vera_B for new models or when loading a checkpoint
-            that did not include these projections. Defaults to `0`.
+            Random seed used when initializing the shared FRoD projection basis and sparse COO pattern.
         save_projection (`bool`):
-            Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d
-            weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on
-            all system configurations. Defaults to `True`.
+            Whether to save the FRoD projection tensors in the state dict. This increases checkpoint size but makes
+            adapter reloading independent of local cache regeneration. Defaults to `True`.
         vera_dropout (`float`):
-            The dropout probability for Vera layers.
-        d_initial (`float`, *optional*, defaults to `0.1`):
-            Initial init value for `vera_lambda_d` vector used when initializing the VeRA parameters. Small values
-            (<=0.1) are recommended (see Table 6c in the paper).
+            The dropout probability for FRoD layers.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         bias (`str`):
-            Bias type for Vera. Can be 'none', 'all' or 'vera_only'. If 'all' or 'vera_only', the corresponding biases
+            Bias type for FRoD. Can be 'none', 'all' or 'vera_only'. If 'all' or 'vera_only', the corresponding biases
             will be updated during training. Be aware that this means that, even when disabling the adapters, the model
             will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
-            List of modules apart from Vera layers to be set as trainable and saved in the final checkpoint.
+            List of modules apart from FRoD layers to be set as trainable and saved in the final checkpoint.
         init_weights (`bool`):
-            Whether to initialize the weights of the Vera layers with their default initialization. Don't change this
+            Whether to initialize the weights of the FRoD layers with their default initialization. Don't change this
             setting, except if you know exactly what you're doing.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the Vera transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the Vera
+            The layer indexes to transform, if this argument is specified, it will apply the FRoD transformations on
+            the layer indexes that are specified in this list. If a single integer is passed, it will apply the FRoD
             transformations on the layer at this index.
         layers_pattern (`Optional[Union[List[str], str]]`):
             The layer pattern name, used only if `layers_to_transform` is different from `None`. This should target the
             `nn.ModuleList` of the model, which is often called `'layers'` or `'h'`.
     """
-
-    # r: int = field(default=256, metadata={"help": "Vera attention dimension"})
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with Vera."
+                "List of module names or regex expression of the module names to replace with FRoD."
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
                 "Only linear layers are supported."
             )
@@ -82,8 +72,7 @@ class FRODConfig(PeftConfig):
         default=0,
         metadata={
             "help": (
-                "Vera PRNG init key. Used for initialising vera_A and vera_B for new models or when loading a "
-                "checkpoint that did not include these projections."
+                "Random seed used when initializing the FRoD projection basis and sparse COO structure."
             )
         },
     )
@@ -91,23 +80,22 @@ class FRODConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / "
-                "lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload "
-                "the checkpoint on all system configurations."
+                "Whether to save the FRoD projection tensors in the state dict. This increases checkpoint size but "
+                "guarantees that we can reload the adapter on all system configurations."
             )
         },
     )
-    vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
+    vera_dropout: float = field(default=0.0, metadata={"help": "FRoD dropout"})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'vera_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for FRoD. Can be 'none', 'all' or 'vera_only'"})
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
             "help": (
-                "List of modules apart from Vera layers to be set as trainable and saved in the final checkpoint. For"
+                "List of modules apart from FRoD layers to be set as trainable and saved in the final checkpoint. For"
                 " example, in Sequence Classification or Token Classification tasks, the final layer"
                 " `classifier/score` are randomly initialized and as such need to be trainable and saved."
             )
@@ -117,7 +105,7 @@ class FRODConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the Vera layers with their default initialization. Don't change "
+                "Whether to initialize the weights of the FRoD layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
         },
@@ -150,9 +138,7 @@ class FRODConfig(PeftConfig):
     regularization_alpha: float = field(
         default=1e-3,
         metadata={
-            "help": (
-                "the regularization parameter for HO-GSVD. "
-            )
+            "help": ("Regularization parameter used when building the shared FRoD basis."),
         },
     )
 
@@ -167,7 +153,7 @@ class FRODConfig(PeftConfig):
             raise ValueError("When `layers_pattern` is specified, `layers_to_transform` must also be specified. ")
         if not self.save_projection:
             warnings.warn(
-                "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored "
-                "using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection` "
-                "to `True` to guarantee restoring the checkpoint correctly on all system configurations."
+                "Specified to not save the FRoD projection tensors within the state dictionary. They will instead be "
+                "reconstructed from `config.projection_prng_key`. Consider setting `config.save_projection=True` to "
+                "guarantee restoring the checkpoint correctly on all system configurations."
             )

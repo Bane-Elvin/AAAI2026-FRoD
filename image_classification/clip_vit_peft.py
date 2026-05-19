@@ -83,7 +83,7 @@ def print_model_info(model):
         print(name, param.numel())
 
 
-def main(method: str, dataset_dir, device):
+def main(method: str, dataset_dir, model_name_or_path: str, device):
     dataset_name = dataset_dir.rsplit("/", 1)[-1]
     print(f"dataset_name: {dataset_name}")
     r_s = 3
@@ -94,8 +94,6 @@ def main(method: str, dataset_dir, device):
         ds = load_dataset(dataset_dir, 'cropped_digits')
     else:
         ds = load_dataset(dataset_dir)
-
-    model_name_or_path = "/your/path/to/models/clip-vit-base-patch32"
 
     feature_extractor = CLIPFeatureExtractor.from_pretrained(model_name_or_path)
 
@@ -229,6 +227,12 @@ if __name__ == "__main__":
         help="Path to the dataset"
     )
     parser.add_argument(
+        "--model_path",
+        type=str,
+        default="/your/path/to/models/clip-vit-base-patch32",
+        help="Path to the CLIP model"
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="cuda:0" if torch.cuda.is_available() else "cpu",
@@ -237,5 +241,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     device = torch.device(args.device)
-
-    main(args.model, args.dataset, device)
+    main(args.model, args.dataset, args.model_path, device)

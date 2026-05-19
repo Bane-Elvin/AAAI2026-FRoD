@@ -1,7 +1,7 @@
 import os
 from itertools import product
 
-# 定义参数取值
+# Parameter values used to generate the shell scripts
 s_values = [0, 0.01, 0.02, 0.1]
 s_lr_values = [0, 1e-5, 5e-5, 1e-4, 5e-4]
 l_lr_values = [0, 1e-4, 5e-4, 1e-3, 5e-3]

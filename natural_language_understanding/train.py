@@ -56,13 +56,10 @@ def collate_fn(examples, tokenizer):
     return tokenizer.pad(examples, padding="longest", return_tensors="pt")
 
 
-def main(method: str, task: str, device):
+def main(method: str, task: str, device, model_name_or_path: str, dataset_root: str):
     random_seed = 3
     wandb.init(project=f'glue_{task}_loss', name=method)
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-
-    model_name_or_path = "/your/path/to/models/roberta-large"
     batch_size = 64
     max_length = 256
     num_epochs = 5
@@ -71,7 +68,7 @@ def main(method: str, task: str, device):
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    datasets = load_dataset("/your/path/to/datasets/glue", task)
+    datasets = load_dataset(dataset_root, task)
     metric = evaluate.load("glue", "sst2")
 
     def tokenize_function(examples):
@@ -228,7 +225,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, default="fullft", help="PEFT method, e.g., frod")
     parser.add_argument("--task", type=str, default="sst2", help="GLUE task, e.g., sst2")
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default="/your/path/to/models/roberta-large",
+        help="Path to the RoBERTa model"
+    )
+    parser.add_argument(
+        "--dataset_root",
+        type=str,
+        default="/your/path/to/datasets/glue",
+        help="Path to the GLUE dataset root"
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     device = torch.device(args.device)
-    main(args.method, args.task, device)
+    main(args.method, args.task, device, args.model_path, args.dataset_root)

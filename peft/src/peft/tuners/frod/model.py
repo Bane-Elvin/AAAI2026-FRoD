@@ -190,14 +190,14 @@ class FRODModel(BaseTuner):
                 continue
             if existing_config.projection_prng_key != config.projection_prng_key:
                 raise ValueError(
-                    f"Vera PRNG initialisation key must be the same for all adapters. Got {config.projection_prng_key=} but "
+                    f"FRoD projection initialization key must be the same for all adapters. Got {config.projection_prng_key=} but "
                     f"previous config had {existing_config.projection_prng_key}."
                 )
 
         save_project_unique_values = sorted({item.save_projection for item in self.peft_config.values()})
         if len(save_project_unique_values) > 1:
             raise ValueError(
-                "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
+                "FRoD projection weights must be saved for all adapters or none, but got multiple different values: "
                 f"{save_project_unique_values}"
             )
 
