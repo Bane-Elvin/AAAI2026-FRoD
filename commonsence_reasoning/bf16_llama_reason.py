@@ -17,7 +17,7 @@ def get_lora_config(method: str, random_seed: int = 3):
     """
     Returns the PEFT configuration based on the specified method.
     """
-    if method.lower() == "FROD":
+    if method.lower() == "frod":
         from peft import FRODConfig
         return FRODConfig(
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj"],
@@ -256,7 +256,7 @@ def main(method: str, dataset_name: str, device: torch.device, model_path: str):
     print(f"Model pad_token_id set to {model.config.pad_token_id}")
 
     # 5. Setup Optimizer and Scheduler
-    if method.lower() == "FROD":
+    if method.lower() == "frod":
         optimizer = AdamW([
             {"params": [p for n, p in model.named_parameters() if "FROD_lambda_S" in n], "lr": 1e-5},
             {"params": [p for n, p in model.named_parameters() if "FROD_lambda_l" in n], "lr": 1e-4},

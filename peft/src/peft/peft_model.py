@@ -34,9 +34,17 @@ from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_downl
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from transformers import Cache, DynamicCache, EncoderDecoderCache, PreTrainedModel
+from transformers import Cache, DynamicCache, PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
+
+try:
+    from transformers import EncoderDecoderCache
+except ImportError:
+    try:
+        from transformers.cache_utils import EncoderDecoderCache
+    except ImportError:
+        EncoderDecoderCache = None
 
 from peft.utils.constants import DUMMY_MODEL_CONFIG, PEFT_TYPE_TO_PREFIX_MAPPING
 
@@ -759,7 +767,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 # Dont' apply this to encoder-decoder models and not to models requiring special processing.
                 # local import in case users use a very old transformers version
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            elif peft_config.num_transformer_submodules == 2 and self.base_model._supports_cache_class:
+            elif (
+                peft_config.num_transformer_submodules == 2
+                and self.base_model._supports_cache_class
+                and EncoderDecoderCache is not None
+            ):
                 # Dont' apply this to encoder-decoder models that don't support new Cachc format yet
                 # If we don't apply this, prefix-tuning fails to update cross-attn cache
                 past_key_values = EncoderDecoderCache.from_legacy_cache(past_key_values)

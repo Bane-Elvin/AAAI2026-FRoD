@@ -14,8 +14,9 @@
 
 import warnings
 from typing import List, Optional
+
 import numpy as np
-from numpy.linalg import qr, inv, eigh, norm
+from numpy.linalg import inv
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,24 +29,23 @@ from .._buffer_dict import BufferDict
 
 
 class FRODLayer(BaseTunerLayer):
-    adapter_layer_names = ("FROD_lambda_S", "FROD_lambda_l")
-    other_param_names = ("FROD_V", "FROD_U", "FROD_S_mask")
+    adapter_layer_names = ("FROD_lambda_S_values", "FROD_lambda_l")
+    other_param_names = ("FROD_V", "FROD_U", "FROD_S_indices", "FROD_S_size")
+
     def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.vera_dropout = nn.ModuleDict({})
 
-        # For storing vector scale
-        self.FROD_lambda_S = nn.ParameterDict({})  # adapter_name -> Parameter[in,out]
+        # Sparse S is parameterized by its COO values only.
+        self.FROD_lambda_S_values = nn.ParameterDict({})
         self.FROD_lambda_l = nn.ParameterDict({})
 
-        # Stores a reference to the vera_A/B BufferDict.
-        # Set to `None` otherwise to avoid computation with random weights
-        self.FROD_S_mask: Optional[BufferDict] = None
+        self.FROD_S_indices: Optional[BufferDict] = None
+        self.FROD_S_size: Optional[BufferDict] = None
         self.FROD_V: Optional[BufferDict] = None
-        self.FROD_U = nn.ParameterDict({})
+        self.FROD_U: BufferDict = BufferDict({}, persistent=False)
 
-        # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
 
@@ -69,13 +69,19 @@ class FRODLayer(BaseTunerLayer):
         self,
         adapter_name,
         FROD_V: BufferDict,
-        FROD_S_mask: BufferDict,
+        FROD_S_indices: BufferDict,
+        FROD_S_size: BufferDict,
         vera_dropout,
         init_weights,
     ):
         weight = self.get_base_layer().weight
         device = weight.device
         dtype = weight.dtype
+
+        param_dtype = dtype
+        if device.type == "cuda" and dtype == torch.float32:
+            param_dtype = torch.float16
+
         self.r[adapter_name] = self.out_features
         if vera_dropout > 0.0:
             vera_dropout_layer = nn.Dropout(p=vera_dropout)
@@ -83,105 +89,87 @@ class FRODLayer(BaseTunerLayer):
             vera_dropout_layer = nn.Identity()
 
         self.vera_dropout.update(nn.ModuleDict({adapter_name: vera_dropout_layer}))
-        # Actual trainable parameters
-        in_dim = self.in_features
 
-        self.FROD_lambda_S[adapter_name] = nn.Parameter(torch.randn(in_dim, in_dim))
+        nnz = FROD_S_indices[adapter_name].shape[1]
+        self.FROD_lambda_S_values[adapter_name] = nn.Parameter(torch.zeros(nnz, device=device, dtype=param_dtype))
 
-        # non trainable references to FROD_V buffers
         self.FROD_V = FROD_V
-        self.FROD_S_mask = FROD_S_mask
-        U, L= self.calculate_FROD_U_FROD_lambda(self.FROD_V[adapter_name], weight)
-        U = U
-        L = L
-        W = torch.zeros_like(weight)
-        self.FROD_lambda_l[adapter_name] = nn.Parameter(L, requires_grad = True)
+        self.FROD_S_indices = FROD_S_indices
+        self.FROD_S_size = FROD_S_size
+
+        # Keep cached projections on CPU and move them lazily in forward.
+        self.FROD_V[adapter_name] = self.FROD_V[adapter_name].to(dtype=param_dtype, device="cpu")
+        self.FROD_S_indices[adapter_name] = self.FROD_S_indices[adapter_name].to(device="cpu", dtype=torch.long)
+        self.FROD_S_size[adapter_name] = self.FROD_S_size[adapter_name].to(device="cpu", dtype=torch.long)
+
+        U, L = self.calculate_FROD_U_FROD_lambda(self.FROD_V[adapter_name], weight)
+        U = U.to(param_dtype)
+        L = L.to(device=device, dtype=param_dtype)
+        self.FROD_lambda_l[adapter_name] = nn.Parameter(L, requires_grad=True)
         if init_weights:
             self.reset_vera_parameters(adapter_name)
-        self.FROD_U[adapter_name] = nn.Parameter(U, requires_grad = False)
 
+        self.FROD_U[adapter_name] = U.cpu()
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
-        weight = transpose(W.to(dtype), self.fan_in_fan_out)
-        self.get_base_layer().weight.data = weight
 
     def calculate_FROD_U_FROD_lambda(self, V, W):
-        w = W.detach().cpu().numpy()
-        v = V.detach().cpu().numpy()
-        v_inv_T = inv(v).T
+        w = W.detach().to(torch.float32).cpu().numpy()
+        v = V.detach().to(torch.float32).cpu().numpy()
+        try:
+            v_inv_T = inv(v).T
+        except np.linalg.LinAlgError:
+            v_inv_T = np.linalg.pinv(v, rcond=1e-6).T
         Bi = w @ v_inv_T
         l = np.linalg.norm(Bi, axis=0)
         u = np.divide(Bi, l, where=l > 1e-8)
-        # # print(u.T @ u)
-        # # print(l)
-        # w = w - u @ np.diag(l) @ v.T
-        # W = torch.from_numpy(w).float()
         U = torch.from_numpy(u).float()
         L = torch.from_numpy(l).float()
         return U, L
 
     def reset_vera_parameters(self, adapter_name):
-        if adapter_name in self.FROD_lambda_S:
+        if adapter_name in self.FROD_lambda_S_values:
             with torch.no_grad():
-                nn.init.zeros_(self.FROD_lambda_S[adapter_name])
+                nn.init.zeros_(self.FROD_lambda_S_values[adapter_name])
 
 
 class Linear(nn.Linear, FRODLayer):
-    # Vera implemented in a dense layer
     def __init__(
         self,
         base_layer,
         FROD_V: BufferDict,
-        FROD_S_mask: BufferDict,
+        FROD_S_indices: BufferDict,
+        FROD_S_size: BufferDict,
         adapter_name: str,
         vera_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        fan_in_fan_out: bool = False,
         is_target_conv_1d_layer: bool = False,
         init_weights: bool = True,
         **kwargs,
     ) -> None:
-        # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
         FRODLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, FROD_V, FROD_S_mask, vera_dropout, init_weights)
+        self.update_layer(adapter_name, FROD_V, FROD_S_indices, FROD_S_size, vera_dropout, init_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
-        """
-        Merge the active adapter weights into the base weights
-
-        Args:
-            safe_merge (`bool`, *optional*):
-                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
-        """
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
-            # no adapter to merge
             return
 
         for active_adapter in adapter_names:
-            if active_adapter in self.vera_lambda_d.keys():
+            if active_adapter in self.FROD_lambda_l.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-
                     orig_weights += self.get_delta_weight(active_adapter)
-
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
@@ -194,16 +182,23 @@ class Linear(nn.Linear, FRODLayer):
 
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.vera_lambda_d.keys():
+            if active_adapter in self.FROD_lambda_l.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         V = self.FROD_V[adapter]
         U = self.FROD_U[adapter]
-        mask = self.FROD_S_mask[adapter].to(U.device)
-        raw  = self.FROD_lambda_S[adapter].to(U.device)
-        S = raw * mask
+        indices = self.FROD_S_indices[adapter].to(device=U.device, dtype=torch.long)
+        size_tensor = self.FROD_S_size[adapter]
+        if isinstance(size_tensor, torch.Tensor):
+            size = tuple(int(dim) for dim in size_tensor.tolist())
+        else:
+            size = tuple(int(dim) for dim in size_tensor)
+        values = self.FROD_lambda_S_values[adapter].to(U.device, U.dtype).clone()
         l = self.FROD_lambda_l[adapter].to(U.device)
+
+        S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
+        S = S_sparse.to_dense()
         L = torch.diag_embed(l)
 
         return transpose(U @ (S + L) @ V.T, self.fan_in_fan_out)
@@ -220,28 +215,75 @@ class Linear(nn.Linear, FRODLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.FROD_lambda_S:
+                if active_adapter not in self.FROD_lambda_S_values:
                     continue
 
-                V = self.FROD_V[active_adapter].to(x.device)
-                U = self.FROD_U[active_adapter].to(x.device)
-                mask = self.FROD_S_mask[active_adapter].to(x.device)
-                raw  = self.FROD_lambda_S[active_adapter].to(x.device)
-                S = raw * mask
-                l = self.FROD_lambda_l[active_adapter].to(x.device)
-                L =torch.diag_embed(l)
+                target_dtype = x.dtype
+                V = self.FROD_V[active_adapter].to(device=x.device, dtype=target_dtype)
+                U = self.FROD_U[active_adapter].to(device=x.device, dtype=target_dtype)
+                indices = self.FROD_S_indices[active_adapter].to(device=x.device, dtype=torch.long)
+                size_tensor = self.FROD_S_size[active_adapter]
+                if isinstance(size_tensor, torch.Tensor):
+                    size = tuple(int(dim) for dim in size_tensor.tolist())
+                else:
+                    size = tuple(int(dim) for dim in size_tensor)
+                values = self.FROD_lambda_S_values[active_adapter].to(device=x.device, dtype=target_dtype)
+                l = self.FROD_lambda_l[active_adapter].to(device=x.device, dtype=target_dtype)
 
-                x = x.to(V.dtype)
+                x = x.to(target_dtype)
                 h = self.vera_dropout[active_adapter](x)
-                # result = result + F.linear(F.linear(F.linear(h, V), S), U) + F.linear(l * F.linear(h, V), U)
-                # result = F.linear(F.linear(F.linear(h, V.T), L + S), U)
-                delta_weight = transpose(U @ (S + L) @ V.T, self.fan_in_fan_out)
-                result = result + F.linear(h, delta_weight)
 
+                batch_shape = h.shape[:-1]
+                h_flat = h.reshape(-1, h.shape[-1])
+                z_flat = torch.matmul(h_flat, V)
+
+                matmul_dtype = z_flat.dtype
+                if z_flat.is_cuda and matmul_dtype in (torch.float16, torch.bfloat16):
+                    matmul_dtype = torch.float32
+
+                values = values.to(device=z_flat.device, dtype=matmul_dtype)
+                z_flat_mm = z_flat.to(matmul_dtype)
+                S_sparse = torch.sparse_coo_tensor(indices, values, size).coalesce()
+                if S_sparse.dtype != matmul_dtype:
+                    S_sparse = S_sparse.to(dtype=matmul_dtype)
+                z_S_flat = torch.sparse.mm(S_sparse.t(), z_flat_mm.t()).t()
+
+                l = l.to(device=z_flat.device, dtype=matmul_dtype)
+                z_L_flat = z_flat_mm * l
+
+                U_mm = U.to(device=z_flat.device, dtype=matmul_dtype)
+                out_add_flat = F.linear(z_S_flat + z_L_flat, U_mm)
+                out_add_flat = out_add_flat.to(target_dtype)
+                out_add = out_add_flat.reshape(*batch_shape, out_add_flat.shape[-1])
+
+                result = result + out_add
 
         result = result.to(previous_dtype)
         return result
 
     def __repr__(self) -> str:
         rep = super().__repr__()
-        return "vera." + rep
+        return "frod." + rep
+
+    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
+        if device is None:
+            for weight_name in ("weight", "qweight"):
+                weight = getattr(self.get_base_layer(), weight_name, None)
+                if weight is not None:
+                    device = weight.device
+                    dtype = weight.dtype
+                    break
+            else:
+                return
+
+        for adapter_layer_name in self.adapter_layer_names:
+            adapter_layer = getattr(self, adapter_layer_name, None)
+            if not isinstance(adapter_layer, nn.ParameterDict):
+                continue
+            if adapter_name not in adapter_layer:
+                continue
+            param = adapter_layer[adapter_name]
+            adapter_layer[adapter_name] = param.to(
+                device,
+                dtype=dtype if weight.dtype.is_floating_point or weight.dtype.is_complex else None,
+            )

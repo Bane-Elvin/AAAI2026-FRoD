@@ -182,16 +182,18 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.FROD:
         to_return = {k: state_dict[k] for k in state_dict if "FROD_lambda_" in k}
         if config.save_projection:
-            # TODO: adding vera_A and vera_B to `self.get_base_layer` would
-            # make name to match here difficult to predict.
             if f"base_model.FROD_V.{adapter_name}" not in state_dict:
                 raise ValueError(
-                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
+                    "Model was initialised to not save FROD projection buffers but config now specifies to save them!"
                     " Set `config.save_projection` to `False`."
                 )
-            to_return["base_model.FROD_U." + adapter_name] = state_dict["base_model.FROD_U." + adapter_name]
             to_return["base_model.FROD_V." + adapter_name] = state_dict["base_model.FROD_V." + adapter_name]
-            to_return["base_model.FROD_S_mask." + adapter_name] = state_dict["base_model.FROD_S_mask." + adapter_name]
+            to_return["base_model.FROD_S_indices." + adapter_name] = state_dict[
+                "base_model.FROD_S_indices." + adapter_name
+            ]
+            to_return["base_model.FROD_S_size." + adapter_name] = state_dict[
+                "base_model.FROD_S_size." + adapter_name
+            ]
     elif config.peft_type == PeftType.FOURIERFT:
         to_return = {k: state_dict[k] for k in state_dict if "fourierft_" in k}
     elif config.peft_type == PeftType.XLORA:

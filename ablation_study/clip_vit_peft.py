@@ -17,7 +17,7 @@ import argparse
 
 
 def get_lora_config(method: str, random_seed: int, sparse_rate: float):
-    if method.lower() == "FROD":
+    if method.lower() == "frod":
         return FRODConfig(
 
             target_modules=["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
@@ -131,7 +131,7 @@ def main(method: str, dataset_dir, device, args):
     print_trainable_parameters(model)
 
 
-    if method.lower() == "FROD":
+    if method.lower() == "frod":
         optimizer = AdamW(
             [
                 {"params": [p for n, p in model.named_parameters() if "FROD_lambda_S" in n], "lr": args.s_lr},

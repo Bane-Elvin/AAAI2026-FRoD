@@ -161,7 +161,8 @@ def map_cache_to_layer_device_map(model, cache) -> None:
     if not (isinstance(cache, transformers.Cache) and hasattr(model, "hf_device_map")):
         return
 
-    if isinstance(cache, transformers.EncoderDecoderCache):
+    encoder_decoder_cache_cls = getattr(transformers, "EncoderDecoderCache", None)
+    if encoder_decoder_cache_cls is not None and isinstance(cache, encoder_decoder_cache_cls):
         map_cache_to_layer_device_map(model, cache.self_attention_cache)
         return
 

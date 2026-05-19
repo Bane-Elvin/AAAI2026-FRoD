@@ -143,6 +143,10 @@ class FRODConfig(PeftConfig):
         },
     )
     sparse_rate: float = field(default=0.01, metadata={"help": "Sparse rate"})
+    model_dir: str = field(
+        default=".",
+        metadata={"help": "Directory used to cache the precomputed FROD projection tensors."},
+    )
     regularization_alpha: float = field(
         default=1e-3,
         metadata={
